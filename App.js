@@ -64,12 +64,21 @@ export default function App() {
             directionalLight.position.set(10, 10, 5);
             scene.add(directionalLight);
 
-            // Physics setup
+            // Physics setup with performance optimizations
             world = new CANNON.World();
             world.gravity.set(0, -9.82, 0);
-            world.broadphase = new CANNON.NaiveBroadphase();
-            world.solver.iterations = 10;
+            
+            // Use SAPBroadphase for better performance with many objects
+            world.broadphase = new CANNON.SAPBroadphase(world);
+            
+            // Optimize solver for performance
+            world.solver.iterations = 5; // Reduced from 10
             world.solver.tolerance = 0.1;
+            
+            // Allow sleeping for static and slow-moving bodies (performance boost)
+            world.allowSleep = true;
+            world.sleepSpeedLimit = 0.1; // Bodies slower than this will sleep
+            world.sleepTimeLimit = 1; // Bodies must be slow for 1 second to sleep
             
             console.log('Physics world initialized with gravity:', world.gravity);
             console.log('3D scene initialized successfully');
@@ -119,18 +128,121 @@ export default function App() {
           console.log('Camera positioned at:', camera.position);
           console.log('Camera looking at: (0, 0.5, 0)');
           
-          // Create static physics body
-          const shape = new CANNON.Box(new CANNON.Vec3(1, 1, 1));
-          modelBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-          modelBody.addShape(shape);
-          modelBody.position.set(0, 0, 0);
-          world.addBody(modelBody);
+          // Create optimized physics bodies from GLTF meshes
+          console.log('Creating optimized physics collision from GLTF meshes...');
+          
+          const levelBodies = [];
+          let meshCount = 0;
+          let physicsBodyCount = 0;
+          const MIN_SIZE_THRESHOLD = 0.1; // Ignore very small objects
+          const MAX_PHYSICS_BODIES = 20; // Limit total physics bodies for performance
+          
+          // Traverse the GLTF model to find suitable meshes for physics
+          model.traverse((child) => {
+            if (child.isMesh && child.geometry && physicsBodyCount < MAX_PHYSICS_BODIES) {
+              meshCount++;
+              
+              try {
+                // Get the geometry and compute bounding box
+                const geometry = child.geometry;
+                geometry.computeBoundingBox();
+                const bbox = geometry.boundingBox;
+                
+                if (bbox) {
+                  // Calculate size and center of the bounding box
+                  const size = new THREE.Vector3();
+                  bbox.getSize(size);
+                  const center = new THREE.Vector3();
+                  bbox.getCenter(center);
+                  
+                  // Skip very small objects (details, decorations)
+                  const minDimension = Math.min(size.x, size.y, size.z);
+                  const maxDimension = Math.max(size.x, size.y, size.z);
+                  
+                  if (minDimension < MIN_SIZE_THRESHOLD) {
+                    console.log(`Skipping small mesh ${meshCount}: ${child.name || 'unnamed'} (size: ${minDimension.toFixed(2)})`);
+                    return;
+                  }
+                  
+                  // Prioritize larger, more important objects for physics
+                  const isImportant = 
+                    child.name?.toLowerCase().includes('floor') ||
+                    child.name?.toLowerCase().includes('ground') ||
+                    child.name?.toLowerCase().includes('wall') ||
+                    child.name?.toLowerCase().includes('platform') ||
+                    maxDimension > 1.0; // Large objects are usually important
+                  
+                  if (!isImportant && physicsBodyCount > 10) {
+                    console.log(`Skipping non-essential mesh ${meshCount}: ${child.name || 'unnamed'} (prioritizing performance)`);
+                    return;
+                  }
+                  
+                  physicsBodyCount++;
+                  console.log(`Creating physics body ${physicsBodyCount} for mesh ${meshCount}: ${child.name || 'unnamed'}`);
+                  
+                  // Create a physics body with a box shape matching the mesh bounds
+                  const halfExtents = new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2);
+                  const shape = new CANNON.Box(halfExtents);
+                  
+                  const body = new CANNON.Body({ 
+                    mass: 0, // Static body
+                    type: CANNON.Body.KINEMATIC 
+                  });
+                  body.addShape(shape);
+                  
+                  // Apply the mesh's world transform to the physics body
+                  const worldPosition = new THREE.Vector3();
+                  const worldQuaternion = new THREE.Quaternion();
+                  const worldScale = new THREE.Vector3();
+                  
+                  child.getWorldPosition(worldPosition);
+                  child.getWorldQuaternion(worldQuaternion);
+                  child.getWorldScale(worldScale);
+                  
+                  // Set physics body position (center + world position)
+                  body.position.set(
+                    worldPosition.x + center.x * worldScale.x,
+                    worldPosition.y + center.y * worldScale.y,
+                    worldPosition.z + center.z * worldScale.z
+                  );
+                  
+                  // Set physics body rotation
+                  body.quaternion.set(
+                    worldQuaternion.x,
+                    worldQuaternion.y,
+                    worldQuaternion.z,
+                    worldQuaternion.w
+                  );
+                  
+                  world.addBody(body);
+                  levelBodies.push(body);
+                  
+                  console.log(`Created physics body for mesh ${meshCount}:`, {
+                    name: child.name || 'unnamed',
+                    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+                    position: { 
+                      x: body.position.x.toFixed(2), 
+                      y: body.position.y.toFixed(2), 
+                      z: body.position.z.toFixed(2) 
+                    }
+                  });
+                }
+              } catch (error) {
+                console.error(`Failed to create physics body for mesh ${meshCount}:`, error);
+              }
+            }
+          });
+          
+          console.log(`Created ${levelBodies.length} physics bodies from ${meshCount} meshes (optimized for performance)`);
+          
+          // Store reference to the first body as modelBody for compatibility
+          modelBody = levelBodies.length > 0 ? levelBodies[0] : null;
           
           console.log('Level setup complete');
           
           // Create physics sphere
           console.log('Creating physics sphere...');
-          const sphereGeometry = new THREE.SphereGeometry(0.5, 32, 24); // Make it bigger and higher quality
+          const sphereGeometry = new THREE.SphereGeometry(1.0, 32, 24); // Match physics body size
           const sphereMaterial = new THREE.MeshStandardMaterial({ 
             color: 0xff0000, // Bright red
             roughness: 0.1,
@@ -138,14 +250,14 @@ export default function App() {
             emissive: 0x330000 // Add slight glow
           });
           sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-          sphere.position.set(0, 1, 0); // Start 1 unit up (matching physics body)
+          sphere.position.set(0, 5, 0); // Start higher up to see the fall
           console.log('Visual sphere created at position:', sphere.position);
           console.log('Sphere added to scene, scene children count:', scene.children.length);
           scene.add(sphere);
           console.log('After adding sphere, scene children count:', scene.children.length);
           
           // Create physics body for sphere
-          const sphereShape = new CANNON.Sphere(0.5); // Same radius as geometry
+          const sphereShape = new CANNON.Sphere(1.0); // Same radius as geometry
           sphereBody = new CANNON.Body({ 
             mass: 1, // Has mass, so it's affected by gravity
             type: CANNON.Body.DYNAMIC 
@@ -153,13 +265,31 @@ export default function App() {
           sphereBody.addShape(sphereShape);
           
           // Set position using Vec3 instead of set method
-          sphereBody.position = new CANNON.Vec3(0, 1, 0);
+          sphereBody.position = new CANNON.Vec3(0, 5, 0); // Start higher up to see the fall
           sphereBody.velocity = new CANNON.Vec3(0, 0, 0); // Initialize velocity
           sphereBody.angularVelocity = new CANNON.Vec3(0, 0, 0); // Initialize angular velocity
           
-          sphereBody.material = new CANNON.Material({
-            friction: 0.4,
-            restitution: 0.6 // Bounciness
+          // Create physics materials for better collision interaction
+          const spherePhysicsMaterial = new CANNON.Material('sphereMaterial');
+          const groundPhysicsMaterial = new CANNON.Material('groundMaterial');
+          
+          // Create contact material
+          const sphereGroundContact = new CANNON.ContactMaterial(
+            spherePhysicsMaterial,
+            groundPhysicsMaterial,
+            {
+              friction: 0.4,
+              restitution: 0.7 // Bounciness
+            }
+          );
+          
+          world.addContactMaterial(sphereGroundContact);
+          
+          sphereBody.material = spherePhysicsMaterial;
+          
+          // Apply ground material to all level bodies
+          levelBodies.forEach(body => {
+            body.material = groundPhysicsMaterial;
           });
           
           console.log('Physics sphere body created with position:', sphereBody.position);
