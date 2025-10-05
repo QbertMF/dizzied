@@ -8,10 +8,14 @@ import { assetManager } from './src/AssetManager';
 import { inputManager } from './src/InputManager';
 
 export default function App() {
-  console.log('App component started');
-  
-  // State for FPS display
+  // Use ref for FPS to avoid re-renders
+  const fpsRef = React.useRef(0);
   const [fps, setFps] = React.useState(0);
+  
+  // Log only on mount, not on every render
+  React.useEffect(() => {
+    console.log('App component mounted');
+  }, []);
 
   // Setup input handlers
   React.useEffect(() => {
@@ -340,11 +344,17 @@ export default function App() {
           frameTimeSum += frameTime;
           fpsFrameCount++;
           
-          // Update FPS display every 30 frames (about twice per second)
-          if (fpsFrameCount >= 30) {
+          // Update FPS display every 60 frames (about once per second) to reduce re-renders
+          if (fpsFrameCount >= 60) {
             const avgFrameTime = frameTimeSum / fpsFrameCount;
             const currentFps = Math.round(1000 / avgFrameTime);
-            setFps(currentFps);
+            
+            // Only update state if FPS changed significantly (avoid unnecessary re-renders)
+            if (Math.abs(currentFps - fpsRef.current) > 2) {
+              fpsRef.current = currentFps;
+              setFps(currentFps);
+            }
+            
             frameTimeSum = 0;
             fpsFrameCount = 0;
           }
