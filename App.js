@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { GLView } from 'expo-gl';
 import { Renderer } from 'expo-three';
 import * as THREE from 'three';
@@ -9,6 +9,9 @@ import { inputManager } from './src/InputManager';
 
 export default function App() {
   console.log('App component started');
+  
+  // State for FPS display
+  const [fps, setFps] = React.useState(0);
 
   // Setup input handlers
   React.useEffect(() => {
@@ -320,9 +323,32 @@ export default function App() {
         console.log('Setting up animation loop...');
         const clock = new THREE.Clock();
         let frameCount = 0;
+        
+        // FPS calculation variables
+        let lastTime = performance.now();
+        let frameTimeSum = 0;
+        let fpsFrameCount = 0;
 
         const animate = () => {
           requestAnimationFrame(animate);
+          
+          // Calculate FPS
+          const currentTime = performance.now();
+          const frameTime = currentTime - lastTime;
+          lastTime = currentTime;
+          
+          frameTimeSum += frameTime;
+          fpsFrameCount++;
+          
+          // Update FPS display every 30 frames (about twice per second)
+          if (fpsFrameCount >= 30) {
+            const avgFrameTime = frameTimeSum / fpsFrameCount;
+            const currentFps = Math.round(1000 / avgFrameTime);
+            setFps(currentFps);
+            frameTimeSum = 0;
+            fpsFrameCount = 0;
+          }
+          
           const delta = clock.getDelta();
           
           // Use fixed timestep to prevent instability
@@ -369,7 +395,32 @@ export default function App() {
         console.log('Animation loop started');
       }}
       />
+      
+      {/* FPS Counter Overlay */}
+      <View style={styles.fpsContainer}>
+        <Text style={styles.fpsText}>FPS: {fps}</Text>
+      </View>
     </View>
   );
 }
+
+// Styles for FPS display
+const styles = StyleSheet.create({
+  fpsContainer: {
+    position: 'absolute',
+    top: 40,
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    zIndex: 1000,
+  },
+  fpsText: {
+    color: '#00ff00',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
+  },
+});
 
