@@ -1,7 +1,7 @@
 import { Asset } from 'expo-asset';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
-import { TextureLoader } from 'expo-three';
+// Note: Using THREE.TextureLoader instead of expo-three TextureLoader
 
 // Static asset registry - add your assets here
 const ASSET_REGISTRY = {
@@ -68,16 +68,26 @@ export class AssetManager {
         height: textureAsset.height
       });
       
-      // Use expo-three TextureLoader with the GL context - this is the correct approach for Expo
-      if (!this.gl) {
-        throw new Error('GL context not set. Call assetManager.setGLContext(gl) before loading textures');
-      }
+      // Use THREE.TextureLoader instead of expo-three (which we removed)
+      console.log('Using THREE.TextureLoader without expo-three dependency...');
+      const textureLoader = new THREE.TextureLoader();
       
-      console.log('Using expo-three TextureLoader with GL context...');
-      const textureLoader = new TextureLoader(this.gl);
-      
-      const texture = await textureLoader.load(textureAsset);
-      console.log('expo-three TextureLoader success! Texture loaded.');
+      const texture = await new Promise((resolve, reject) => {
+        textureLoader.load(
+          textureAsset.uri,
+          (loadedTexture) => {
+            console.log('THREE.TextureLoader success! Texture loaded.');
+            resolve(loadedTexture);
+          },
+          (progress) => {
+            console.log('Texture loading progress:', progress);
+          },
+          (error) => {
+            console.error('THREE.TextureLoader error:', error);
+            reject(error);
+          }
+        );
+      });
       
       if (!texture) {
         throw new Error('Texture loading returned null');
@@ -135,29 +145,120 @@ export class AssetManager {
       const asset = Asset.fromModule(ASSET_REGISTRY.models[modelName]);
       await asset.downloadAsync();
       console.log(`GLTF asset downloaded: ${modelName}`);
+      console.log('Asset details:', {
+        localUri: asset.localUri,
+        uri: asset.uri,
+        name: asset.name,
+        type: asset.type,
+        hash: asset.hash
+      });
       
-      // Load GLTF
-      const gltf = await new Promise((resolve, reject) => {
-        this.gltfLoader.load(
-          asset.localUri || asset.uri,
-          resolve,
-          undefined,
-          reject
-        );
+      // Determine the correct URI to use
+      // GLTFLoader has issues with file:// URIs in React Native, prefer HTTP URI
+      let modelUri = asset.uri || asset.localUri;
+      if (!modelUri) {
+        throw new Error('Asset has no URI available for loading');
+      }
+      
+      // If we got a file:// URI and have an HTTP alternative, use HTTP
+      if (modelUri.startsWith('file://') && asset.uri && asset.uri.startsWith('http')) {
+        modelUri = asset.uri;
+        console.log('Switching from file:// to HTTP URI for better GLTFLoader compatibility');
+      }
+      
+      console.log(`Loading GLTF from URI: ${modelUri}`);
+      
+      // Load GLTF with fetch-based approach (better React Native compatibility)
+      console.log('Using fetch-based GLTF loading for React Native compatibility...');
+      
+      const gltf = await new Promise(async (resolve, reject) => {
+        try {
+          // Fetch the GLTF file as ArrayBuffer
+          console.log('Fetching GLTF data...');
+          const response = await fetch(modelUri);
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          console.log(`GLTF data fetched: ${arrayBuffer.byteLength} bytes`);
+          
+          // Parse with GLTFLoader
+          this.gltfLoader.parse(
+            arrayBuffer,
+            '', // resourcePath - empty for arraybuffer
+            (loadedGltf) => {
+              console.log('GLTF parsed successfully:', {
+                hasScene: !!loadedGltf.scene,
+                sceneChildren: loadedGltf.scene?.children?.length || 0,
+                animations: loadedGltf.animations?.length || 0
+              });
+              resolve(loadedGltf);
+            },
+            (error) => {
+              console.error('GLTF parse error:', error);
+              reject(error);
+            }
+          );
+        } catch (fetchError) {
+          console.error('Error fetching GLTF:', fetchError);
+          reject(fetchError);
+        }
       });
       
       if (!gltf || !gltf.scene) {
         throw new Error('GLTF loaded but scene is missing');
       }
       
+      // Process the loaded model
+      console.log('Processing GLTF scene...');
+      const scene = gltf.scene;
+      
+      // Ensure the scene is properly set up
+      scene.traverse((child) => {
+        if (child.isMesh) {
+          // Ensure geometry is available
+          if (child.geometry) {
+            child.geometry.computeBoundingBox();
+            child.geometry.computeBoundingSphere();
+          }
+          
+          // Ensure material is available
+          if (!child.material) {
+            child.material = new THREE.MeshStandardMaterial({ color: 0x888888 });
+          }
+        }
+      });
+      
       // Cache the model
-      this.loadedModels.set(key, gltf.scene);
-      console.log(`Model loaded and cached: ${key}`);
+      this.loadedModels.set(key, scene);
+      console.log(`Model processed and cached: ${key}`);
+      console.log(`Scene contains ${scene.children.length} children`);
       
       // Return a clone
-      return gltf.scene.clone();
+      return scene.clone();
     } catch (error) {
       console.error(`Failed to load model ${modelName}:`, error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // Try to provide more specific error information
+      if (error.message && error.message.includes('match')) {
+        console.error('URI matching error - this might be related to GLTFLoader compatibility with React Native');
+        try {
+          console.error('Asset details:', {
+            localUri: asset?.localUri,
+            uri: asset?.uri,
+            name: asset?.name
+          });
+        } catch (assetLogError) {
+          console.error('Could not log asset details:', assetLogError.message);
+        }
+      }
+      
       return null;
     }
   }
