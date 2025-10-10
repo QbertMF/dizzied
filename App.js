@@ -327,6 +327,15 @@ export default function App() {
             // Add some rotation for visual effect (independent of physics)
             sphere.rotation.x += 0.01;
             
+            // Camera follows the sphere
+            const targetCameraPosition = new THREE.Vector3(
+              sphereBody.position.x + 0,
+              sphereBody.position.y + 10,  // 10 units above the sphere
+              sphereBody.position.z + 15   // 15 units behind the sphere
+            );
+            camera.position.lerp(targetCameraPosition, 0.05);
+            //camera.lookAt(sphereBody.position);
+            
             // Reset sphere if it falls too low (for continuous demo)
             if (sphereBody.position.y < -10) {
               sphereBody.position.set(
