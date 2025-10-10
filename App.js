@@ -6,11 +6,19 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { assetManager } from './src/AssetManager';
 import { inputManager } from './src/InputManager';
-
+import { physicsManager } from './src/PhysicsManager';
 export default function App() {
   // Use ref for FPS to avoid re-renders
   const fpsRef = React.useRef(0);
   const [fps, setFps] = React.useState(0);
+  
+  // Physics statistics state
+  const [physicsStats, setPhysicsStats] = React.useState({
+    totalChunks: 0,
+    loadedChunks: 0,
+    totalTrimeshes: 0,
+    loadedTrimeshes: 0
+  });
   
   // Log only on mount, not on every render
   React.useEffect(() => {
@@ -135,115 +143,17 @@ export default function App() {
           console.log('Camera positioned at:', camera.position);
           console.log('Camera looking at: (0, 0.5, 0)');
           
-          // Create optimized physics bodies from GLTF meshes
-          console.log('Creating optimized physics collision from GLTF meshes...');
+          // Initialize PhysicsManager and process geometry
+          console.log('Setting up PhysicsManager...');
+          physicsManager.setWorld(world);
+          physicsManager.processGeometry(model);
           
-          const levelBodies = [];
-          let meshCount = 0;
-          let physicsBodyCount = 0;
-          const MIN_SIZE_THRESHOLD = 0.1; // Ignore very small objects
-          const MAX_PHYSICS_BODIES = 20; // Limit total physics bodies for performance
-          
-          // Traverse the GLTF model to find suitable meshes for physics
-          model.traverse((child) => {
-            if (child.isMesh && child.geometry && physicsBodyCount < MAX_PHYSICS_BODIES) {
-              meshCount++;
-              
-              try {
-                // Get the geometry and compute bounding box
-                const geometry = child.geometry;
-                geometry.computeBoundingBox();
-                const bbox = geometry.boundingBox;
-                
-                if (bbox) {
-                  // Calculate size and center of the bounding box
-                  const size = new THREE.Vector3();
-                  bbox.getSize(size);
-                  const center = new THREE.Vector3();
-                  bbox.getCenter(center);
-                  
-                  // Skip very small objects (details, decorations)
-                  const minDimension = Math.min(size.x, size.y, size.z);
-                  const maxDimension = Math.max(size.x, size.y, size.z);
-                  
-                  if (minDimension < MIN_SIZE_THRESHOLD) {
-                    console.log(`Skipping small mesh ${meshCount}: ${child.name || 'unnamed'} (size: ${minDimension.toFixed(2)})`);
-                    return;
-                  }
-                  
-                  // Prioritize larger, more important objects for physics
-                  const isImportant = 
-                    child.name?.toLowerCase().includes('floor') ||
-                    child.name?.toLowerCase().includes('ground') ||
-                    child.name?.toLowerCase().includes('wall') ||
-                    child.name?.toLowerCase().includes('platform') ||
-                    maxDimension > 1.0; // Large objects are usually important
-                  
-                  if (!isImportant && physicsBodyCount > 10) {
-                    console.log(`Skipping non-essential mesh ${meshCount}: ${child.name || 'unnamed'} (prioritizing performance)`);
-                    return;
-                  }
-                  
-                  physicsBodyCount++;
-                  console.log(`Creating physics body ${physicsBodyCount} for mesh ${meshCount}: ${child.name || 'unnamed'}`);
-                  
-                  // Create a physics body with a box shape matching the mesh bounds
-                  const halfExtents = new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2);
-                  const shape = new CANNON.Box(halfExtents);
-                  
-                  const body = new CANNON.Body({ 
-                    mass: 0, // Static body
-                    type: CANNON.Body.KINEMATIC 
-                  });
-                  body.addShape(shape);
-                  
-                  // Apply the mesh's world transform to the physics body
-                  const worldPosition = new THREE.Vector3();
-                  const worldQuaternion = new THREE.Quaternion();
-                  const worldScale = new THREE.Vector3();
-                  
-                  child.getWorldPosition(worldPosition);
-                  child.getWorldQuaternion(worldQuaternion);
-                  child.getWorldScale(worldScale);
-                  
-                  // Set physics body position (center + world position)
-                  body.position.set(
-                    worldPosition.x + center.x * worldScale.x,
-                    worldPosition.y + center.y * worldScale.y,
-                    worldPosition.z + center.z * worldScale.z
-                  );
-                  
-                  // Set physics body rotation
-                  body.quaternion.set(
-                    worldQuaternion.x,
-                    worldQuaternion.y,
-                    worldQuaternion.z,
-                    worldQuaternion.w
-                  );
-                  
-                  world.addBody(body);
-                  levelBodies.push(body);
-                  
-                  console.log(`Created physics body for mesh ${meshCount}:`, {
-                    name: child.name || 'unnamed',
-                    size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
-                    position: { 
-                      x: body.position.x.toFixed(2), 
-                      y: body.position.y.toFixed(2), 
-                      z: body.position.z.toFixed(2) 
-                    }
-                  });
-                }
-              } catch (error) {
-                console.error(`Failed to create physics body for mesh ${meshCount}:`, error);
-              }
-            }
-          });
-          
-          console.log(`Created ${levelBodies.length} physics bodies from ${meshCount} meshes (optimized for performance)`);
-          
-          // Store reference to the first body as modelBody for compatibility
-          modelBody = levelBodies.length > 0 ? levelBodies[0] : null;
+          // Create a simple ground plane as fallback for modelBody compatibility
+          const groundShape = new CANNON.Box(new CANNON.Vec3(50, 0.1, 50));
+          modelBody = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+          modelBody.addShape(groundShape);
+          modelBody.position.set(0, -1, 0);
+          world.addBody(modelBody);
           
           console.log('Level setup complete');
           
@@ -294,10 +204,7 @@ export default function App() {
           
           sphereBody.material = spherePhysicsMaterial;
           
-          // Apply ground material to all level bodies
-          levelBodies.forEach(body => {
-            body.material = groundPhysicsMaterial;
-          });
+          // Note: PhysicsManager handles materials for level bodies internally
           
           console.log('Physics sphere body created with position:', sphereBody.position);
           console.log('Adding sphere body to world...');
@@ -382,6 +289,9 @@ export default function App() {
               sphereBody.velocity = new CANNON.Vec3(0, 0, 0);
             }
             
+            // Update PhysicsManager with sphere position for chunk loading/unloading
+            physicsManager.updateChunks(sphereBody.position);
+            
             // Log sphere position every 60 frames (roughly once per second at 60fps)
             frameCount++;
             if (frameCount % 60 === 0) {
@@ -390,6 +300,34 @@ export default function App() {
               console.log(`Sphere velocity: x=${sphereBody.velocity.x.toFixed(2)}, y=${sphereBody.velocity.y.toFixed(2)}, z=${sphereBody.velocity.z.toFixed(2)}`);
               console.log(`Camera position: x=${camera.position.x.toFixed(2)}, y=${camera.position.y.toFixed(2)}, z=${camera.position.z.toFixed(2)}`);
               console.log(`Delta time: ${delta.toFixed(4)}`);
+              
+              // Log PhysicsManager status and update stats
+              const status = physicsManager.getStatus();
+              console.log(`PhysicsManager: ${status.loadedChunks}/${status.totalChunks} chunks loaded`);
+              
+              // Calculate trimesh statistics
+              let totalTrimeshes = 0;
+              let loadedTrimeshes = 0;
+              
+              physicsManager.chunks.forEach(chunk => {
+                totalTrimeshes += chunk.trimeshes.length;
+                if (chunk.isLoaded) {
+                  loadedTrimeshes += chunk.trimeshes.length;
+                }
+              });
+              
+              // Update physics stats (only update if values changed to avoid unnecessary re-renders)
+              const newStats = {
+                totalChunks: status.totalChunks,
+                loadedChunks: status.loadedChunks,
+                totalTrimeshes: totalTrimeshes,
+                loadedTrimeshes: loadedTrimeshes
+              };
+              
+              // Only update if stats have changed
+              if (JSON.stringify(newStats) !== JSON.stringify(physicsStats)) {
+                setPhysicsStats(newStats);
+              }
             }
           }
 
@@ -410,11 +348,22 @@ export default function App() {
       <View style={styles.fpsContainer}>
         <Text style={styles.fpsText}>FPS: {fps}</Text>
       </View>
+      
+      {/* Physics Statistics Overlay */}
+      <View style={styles.physicsStatsContainer}>
+        <Text style={styles.physicsStatsTitle}>Physics World</Text>
+        <Text style={styles.physicsStatsText}>
+          Chunks: {physicsStats.loadedChunks}/{physicsStats.totalChunks}
+        </Text>
+        <Text style={styles.physicsStatsText}>
+          Trimeshes: {physicsStats.loadedTrimeshes}/{physicsStats.totalTrimeshes}
+        </Text>
+      </View>
     </View>
   );
 }
 
-// Styles for FPS display
+// Styles for FPS and Physics stats display
 const styles = StyleSheet.create({
   fpsContainer: {
     position: 'absolute',
@@ -431,6 +380,30 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     fontFamily: 'monospace',
+  },
+  physicsStatsContainer: {
+    position: 'absolute',
+    top: 90, // Positioned below FPS counter
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    zIndex: 1000,
+    minWidth: 150,
+  },
+  physicsStatsTitle: {
+    color: '#ffaa00',
+    fontSize: 14,
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
+    marginBottom: 4,
+  },
+  physicsStatsText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    lineHeight: 16,
   },
 });
 
