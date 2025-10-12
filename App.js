@@ -239,7 +239,7 @@ export default function App() {
         // Add LevelManager geometry on top of existing level
         try {
           console.log('Creating LevelManager example level...');
-          await levelManager.initialize();
+          await levelManager.initialize('./assets/textures.png');
           const levelManagerGeometry = levelManager.createExampleLevel();
           
           if (levelManagerGeometry && levelManagerGeometry.children.length > 0) {

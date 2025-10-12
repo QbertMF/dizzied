@@ -408,9 +408,43 @@ class TextureManager {
    * Load texture atlas from assets/textures.png
    */
   async loadTextureAtlas(textureUrl = 'assets/textures.png') {
-    // For React Native compatibility, use simple colored materials
-    console.log('Using simple colored materials for React Native compatibility');
-    this.createFallbackMaterials();
+    console.log('Creating texture-like materials for React Native compatibility');
+    
+    // For React Native, we'll create distinct colored materials that simulate texture indices
+    // This makes it easy to see which texture index is being used for each block
+    this.createTextureIndexMaterials();
+  }
+  
+  /**
+   * Create materials that visually represent texture indices
+   */
+  createTextureIndexMaterials() {
+    console.log('Creating texture index materials (10x10 = 100 textures)');
+    
+    // Create materials for each texture index in the 10x10 atlas
+    for (let i = 0; i < 100; i++) {
+      // Calculate grid position (x, y) for texture index i
+      const x = i % this.texturesPerRow;  // 0-9
+      const y = Math.floor(i / this.texturesPerRow);  // 0-9
+      
+      // Create distinct colors based on grid position
+      // Use different color schemes for sides vs tops
+      
+      // Side materials: Use hue based on texture index
+      const sideHue = (i * 3.6) % 360;  // Distribute hues across spectrum
+      const sideColor = new THREE.Color().setHSL(sideHue / 360, 0.8, 0.4);
+      const sideMaterial = new THREE.MeshLambertMaterial({ color: sideColor });
+      
+      // Top materials: Use different saturation/lightness for distinction
+      const topHue = (i * 3.6) % 360;
+      const topColor = new THREE.Color().setHSL(topHue / 360, 0.6, 0.7);
+      const topMaterial = new THREE.MeshLambertMaterial({ color: topColor });
+      
+      this.sideMaterials.set(i, sideMaterial);
+      this.topMaterials.set(i, topMaterial);
+    }
+    
+    console.log(`Created ${this.sideMaterials.size} texture index materials`);
   }
   
   /**
@@ -563,18 +597,18 @@ export class LevelManager {
   createExampleLevel() {
     // Height base map (16x16 block heights) - Flat area with walls at edges
     const heightBase = `
-00 00 00 00 03 03 03 03 03 03 03 03 03 03 03 03
-00 00 00 00 01 01 01 01 01 01 01 01 01 01 01 03
-00 00 00 00 01 01 01 01 01 01 01 01 01 01 01 03
-03 02 01 01 01 01 01 01 01 01 01 01 01 01 01 03
-03 03 01 01 01 01 01 02 02 01 01 01 01 01 01 03
-03 03 01 01 01 01 02 02 02 02 01 01 01 01 01 03
-03 03 01 01 01 02 02 02 02 02 02 01 01 01 01 03
-03 03 01 01 01 01 02 02 02 02 01 01 01 01 01 03
-03 03 01 01 01 01 01 02 02 01 01 01 01 01 01 03
-03 03 01 01 01 01 01 01 01 01 01 01 01 01 01 03  
-03 03 01 01 01 01 01 01 01 01 01 01 01 01 01 03
-03 03 01 01 01 01 01 01 01 01 01 01 01 01 01 03
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -582,22 +616,22 @@ export class LevelManager {
 
     // Height offset map (16x16 block heights) - Add ramps and keep walls low
     const heightOffset = `
-01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00 00 00 00 00 01 01 01 01 01 01 00 00 00 00 00
-00 00 00 01 01 01 01 01 01 01 01 01 01 00 00 00
-00 00 00 01 01 01 01 00 00 01 01 01 01 00 00 00
-00 00 00 01 01 01 00 00 00 00 01 01 01 00 00 00
-00 00 00 01 01 00 00 00 00 00 00 01 01 00 00 00
-00 00 00 01 01 01 00 00 00 00 01 01 01 00 00 00
-00 00 00 01 01 01 01 00 00 01 01 01 01 00 00 00
-00 00 00 01 01 01 01 01 01 01 01 01 01 00 00 00
-00 00 00 00 00 01 01 01 01 01 01 00 00 00 00 00
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-02 02 02 00 01 01 01 00 00 00 00 00 00 00 00 00
-02 02 02 01 01 01 01 00 00 00 00 00 00 00 00 00`;
+01 01 01 01 01 01 01 01 01 01 01 01 01 01 01 01
+01 01 01 01 01 01 01 01 01 01 01 01 01 01 01 01
+00 00 00 00 00 01 01 01 01 01 01 00 00 00 00 01
+00 00 00 01 01 01 01 01 01 01 01 01 01 00 00 01
+00 00 00 01 01 01 01 00 00 01 01 01 01 00 00 01
+00 00 00 01 01 01 00 00 00 00 01 01 01 00 00 01
+00 00 00 01 01 00 00 00 00 00 00 01 01 00 00 01
+00 00 00 01 01 01 00 00 00 00 01 01 01 00 00 01
+00 00 00 01 01 01 01 00 00 01 01 01 01 00 00 01
+00 00 00 01 01 01 01 01 01 01 01 01 01 00 00 01
+00 00 00 00 00 01 01 01 01 01 01 00 00 00 00 01
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01
+01 00 02 00 01 01 01 00 00 00 00 00 00 00 00 01
+01 00 02 01 01 01 01 00 00 00 00 00 00 00 00 01`;
 
     // Side texture indices (8x8 blocks) - using 2-digit format
     const sideTextures = `
@@ -608,18 +642,18 @@ export class LevelManager {
 33 34 35 36 37 38 39 40
 41 42 43 44 45 46 47 48
 49 50 51 52 53 54 55 56
-57 58 59 60 61 62 63 64`;
+40 58 59 60 61 62 63 64`;
 
     // Top texture indices (8x8 blocks) - using 2-digit format
     const topTextures = `
-65 66 67 68 69 70 71 72
+01 02 03 04 05 06 07 08
 73 74 75 76 77 78 79 80
 81 82 83 84 85 86 87 88
 89 90 91 92 93 94 95 96
 97 98 99 00 01 02 03 04
 05 06 07 08 09 10 11 12
 13 14 15 16 17 18 19 20
-21 22 23 24 25 26 27 28`;
+20 22 23 24 25 26 27 28`;
 
     // Object placement (8x8 blocks) - C=Crystal, S=Switch, L=Lift, space=empty
     const objects = `
@@ -630,7 +664,7 @@ S     L
   L   C  
 C   S    
   S   L  
-L   C   S`;
+    C   S`;
 
     // Load the example chunk
     this.loadChunkFromASCII(0, 0, heightBase, heightOffset, sideTextures, topTextures, objects);
