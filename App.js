@@ -7,6 +7,7 @@ import { assetManager } from './src/AssetManager';
 import { inputManager } from './src/InputManager';
 import { physicsManager } from './src/PhysicsManager';
 import { accelerometerManager } from './src/AccelerometerManager';
+import { levelManager } from './src/LevelManager';
 
 // Rebuilt 3D app without expo-three dependency
 export default function App() {
@@ -33,6 +34,9 @@ export default function App() {
   const sphereBodyRef = React.useRef(null);
   const sphereRef = React.useRef(null);
   const worldRef = React.useRef(null); // Store world reference for gravity updates
+  
+  // Define initial sphere position
+  const INITIAL_SPHERE_POSITION = { x: 0, y: 10, z: 0 }; // Higher up position
   
   // Setup input handlers and cleanup
   React.useEffect(() => {
@@ -232,6 +236,40 @@ export default function App() {
           obstacles: obstacles.length
         });
         
+        // Add LevelManager geometry on top of existing level
+        try {
+          console.log('Creating LevelManager example level...');
+          await levelManager.initialize();
+          const levelManagerGeometry = levelManager.createExampleLevel();
+          
+          if (levelManagerGeometry && levelManagerGeometry.children.length > 0) {
+            // Position the LevelManager level in the center
+            levelManagerGeometry.position.set(-1, 4, 0); // Centered and above existing level
+            scene.add(levelManagerGeometry);
+            
+            console.log('LevelManager level added:', {
+              blocks: levelManagerGeometry.children.length,
+              position: { x: 0, y: 4, z: 0 }
+            });
+            
+            // Also add physics for the LevelManager geometry
+            const levelManagerBodies = levelManager.createTrimesh();
+            levelManagerBodies.forEach(body => {
+              // Offset physics bodies to match geometry position
+              body.position.x += -1;  // Centered
+              body.position.y += 4;  // 4 units above ground
+              body.position.z += 0;  // Centered
+              world.addBody(body);
+            });
+            
+            console.log(`Added ${levelManagerBodies.length} physics bodies for LevelManager level`);
+          } else {
+            console.warn('LevelManager geometry is empty');
+          }
+        } catch (levelManagerError) {
+          console.error('Error creating LevelManager level:', levelManagerError);
+        }
+        
         // Initialize PhysicsManager with the procedural level
         console.log('Initializing PhysicsManager with procedural geometry...');
         physicsManager.setWorld(world);
@@ -268,7 +306,7 @@ export default function App() {
         opacity: 0.9 
       });
       sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      sphere.position.set(0, 5, 0);
+      sphere.position.set(INITIAL_SPHERE_POSITION.x, INITIAL_SPHERE_POSITION.y, INITIAL_SPHERE_POSITION.z);
       sphere.castShadow = true;
       scene.add(sphere);
       
@@ -279,7 +317,7 @@ export default function App() {
         material: new CANNON.Material({ friction: 0.3, restitution: 0.7 })
       });
       sphereBody.addShape(sphereShape);
-      sphereBody.position.set(0, 5, 0);
+      sphereBody.position.set(INITIAL_SPHERE_POSITION.x, INITIAL_SPHERE_POSITION.y, INITIAL_SPHERE_POSITION.z);
       world.addBody(sphereBody);
       
       // Store references for reset functionality
@@ -340,7 +378,7 @@ export default function App() {
             if (sphereBody.position.y < -10) {
               sphereBody.position.set(
                 (Math.random() - 0.5) * 8, // Random X position
-                10, 
+                INITIAL_SPHERE_POSITION.y, 
                 (Math.random() - 0.5) * 8  // Random Z position
               );
               sphereBody.velocity.set(0, 0, 0);
@@ -424,12 +462,12 @@ export default function App() {
     
     if (sphereBodyRef.current && sphereRef.current) {
       // Reset physics body position and velocity
-      sphereBodyRef.current.position.set(0, 5, 0);
+      sphereBodyRef.current.position.set(INITIAL_SPHERE_POSITION.x, INITIAL_SPHERE_POSITION.y, INITIAL_SPHERE_POSITION.z);
       sphereBodyRef.current.velocity.set(0, 0, 0);
       sphereBodyRef.current.angularVelocity.set(0, 0, 0);
       
       // Reset visual sphere position
-      sphereRef.current.position.set(0, 5, 0);
+      sphereRef.current.position.set(INITIAL_SPHERE_POSITION.x, INITIAL_SPHERE_POSITION.y, INITIAL_SPHERE_POSITION.z);
       sphereRef.current.quaternion.set(0, 0, 0, 1);
       
       console.log('Sphere reset to initial position');

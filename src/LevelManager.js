@@ -147,9 +147,8 @@ class LevelChunk {
     }
     
     // Calculate AABB for this chunk
-    this.geometry.computeBoundingBox();
-    if (this.geometry.boundingBox) {
-      this.aabb = this.geometry.boundingBox.clone();
+    if (this.geometry.children.length > 0) {
+      this.aabb = new THREE.Box3().setFromObject(this.geometry);
     } else {
       this.aabb = new THREE.Box3();
     }
