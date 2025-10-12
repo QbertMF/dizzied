@@ -571,7 +571,7 @@ const styles = StyleSheet.create({
     bottom: 20,
     left: 20,
     right: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
     padding: 15,
     borderRadius: 10,
     borderWidth: 1,
