@@ -11,9 +11,9 @@ class LevelChunk {
     this.chunkSize = chunkSize; // 8x8 blocks per chunk
     this.id = `chunk_${chunkX}_${chunkZ}`;
     
-    // ASCII tables for this chunk (9x9 for corner heights - one extra for block corners)
-    this.heightBase = [];     // 9x9 base heights
-    this.heightOffset = [];   // 9x9 height offsets
+    // ASCII tables for this chunk (16x16 for block heights - 2x2 per block)
+    this.heightBase = [];     // 16x16 base heights (each block has its own height)
+    this.heightOffset = [];   // 16x16 height offsets (each block has its own offset)
     this.sideTextures = [];   // 8x8 side texture indices
     this.topTextures = [];    // 8x8 top texture indices
     this.objects = [];        // 8x8 object types ("C", "S", "L", " ")
@@ -31,11 +31,11 @@ class LevelChunk {
    * Initialize chunk with empty/default data
    */
   initializeEmptyChunk() {
-    // Initialize height arrays (9x9 for corners)
-    for (let y = 0; y < 9; y++) {
+    // Initialize height arrays (16x16 for block heights)
+    for (let y = 0; y < 16; y++) {
       this.heightBase[y] = [];
       this.heightOffset[y] = [];
-      for (let x = 0; x < 9; x++) {
+      for (let x = 0; x < 16; x++) {
         this.heightBase[y][x] = 0;
         this.heightOffset[y][x] = 0;
       }
@@ -59,20 +59,20 @@ class LevelChunk {
    * Load chunk data from ASCII tables
    */
   loadFromASCII(heightBaseASCII, heightOffsetASCII, sideTexturesASCII, topTexturesASCII, objectsASCII) {
-    // Parse base heights (9x9)
+    // Parse base heights (16x16)
     const baseLines = heightBaseASCII.trim().split('\n');
-    for (let y = 0; y < 9 && y < baseLines.length; y++) {
+    for (let y = 0; y < 16 && y < baseLines.length; y++) {
       const values = baseLines[y].trim().split(/\s+/);
-      for (let x = 0; x < 9 && x < values.length; x++) {
+      for (let x = 0; x < 16 && x < values.length; x++) {
         this.heightBase[y][x] = parseInt(values[x]) || 0;
       }
     }
     
-    // Parse height offsets (9x9)
+    // Parse height offsets (16x16) 
     const offsetLines = heightOffsetASCII.trim().split('\n');
-    for (let y = 0; y < 9 && y < offsetLines.length; y++) {
+    for (let y = 0; y < 16 && y < offsetLines.length; y++) {
       const values = offsetLines[y].trim().split(/\s+/);
-      for (let x = 0; x < 9 && x < values.length; x++) {
+      for (let x = 0; x < 16 && x < values.length; x++) {
         this.heightOffset[y][x] = parseInt(values[x]) || 0;
       }
     }
@@ -107,9 +107,10 @@ class LevelChunk {
   }
   
   /**
-   * Get total height at corner (base + offset)
+   * Get total height for block (base + offset)
    */
-  getCornerHeight(x, y) {
+  getBlockHeight(x, y) {
+    if (x < 0 || x >= 16 || y < 0 || y >= 16) return 0;
     return this.heightBase[y][x] + this.heightOffset[y][x];
   }
   
@@ -124,11 +125,15 @@ class LevelChunk {
     
     for (let z = 0; z < 8; z++) {
       for (let x = 0; x < 8; x++) {
-        // Get corner heights for this block
-        const h00 = this.getCornerHeight(x, z);       // Bottom-left
-        const h10 = this.getCornerHeight(x + 1, z);   // Bottom-right
-        const h01 = this.getCornerHeight(x, z + 1);   // Top-left
-        const h11 = this.getCornerHeight(x + 1, z + 1); // Top-right
+        // Each 8x8 block maps to 2x2 height values in the 16x16 grid
+        const heightX = x * 2;
+        const heightZ = z * 2;
+        
+        // Get block heights (each block has its own height)
+        const h00 = this.getBlockHeight(heightX, heightZ);         // Bottom-left
+        const h10 = this.getBlockHeight(heightX + 1, heightZ);     // Bottom-right  
+        const h01 = this.getBlockHeight(heightX, heightZ + 1);     // Top-left
+        const h11 = this.getBlockHeight(heightX + 1, heightZ + 1); // Top-right
         
         // Skip blocks with zero height at all corners
         const maxHeight = Math.max(h00, h10, h01, h11);
@@ -157,23 +162,145 @@ class LevelChunk {
   }
   
   /**
-   * Generate a block with variable corner heights (slopes/ramps)
+   * Generate a block with variable corner heights (slopes/ramps/walls)
    */
   generateBlock(worldX, worldZ, h00, h10, h01, h11, sideTexture, topTexture, textureManager) {
-    // For React Native compatibility, use simple box geometry
-    // Calculate average height for the block
-    const avgHeight = (h00 + h10 + h01 + h11) / 4;
+    const maxHeight = Math.max(h00, h10, h01, h11);
+    if (maxHeight <= 0) return; // Skip blocks with no height
     
-    if (avgHeight <= 0) return; // Skip blocks with no height
+    // Determine if this is a wall (steep height differences) or slope (gradual)
+    const heightDiff = Math.max(h00, h10, h01, h11) - Math.min(h00, h10, h01, h11);
+    const isWall = heightDiff > 4; // Consider it a wall if height difference > 4 units (more lenient)
     
-    const geometry = new THREE.BoxGeometry(1, avgHeight, 1);
+    if (isWall) {
+      this.generateWallBlock(worldX, worldZ, h00, h10, h01, h11, sideTexture, topTexture, textureManager);
+    } else {
+      this.generateSlopeBlock(worldX, worldZ, h00, h10, h01, h11, sideTexture, topTexture, textureManager);
+    }
+  }
+  
+  /**
+   * Generate a wall block (steep vertical sides)
+   */
+  generateWallBlock(worldX, worldZ, h00, h10, h01, h11, sideTexture, topTexture, textureManager) {
+    const maxHeight = Math.max(h00, h10, h01, h11);
+    
+    // Create a tall block based on the maximum height
+    const geometry = new THREE.BoxGeometry(1, maxHeight, 1);
     const material = textureManager.getSideMaterial(sideTexture);
     
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(worldX + 0.5, avgHeight / 2, worldZ + 0.5);
-    mesh.name = `block_${worldX}_${worldZ}`;
+    mesh.position.set(worldX + 0.5, maxHeight / 2, worldZ + 0.5);
+    mesh.name = `wall_${worldX}_${worldZ}`;
     mesh.userData = { 
-      type: 'block', 
+      type: 'wall', 
+      chunkId: this.id,
+      cornerHeights: { h00, h10, h01, h11 },
+      sideTexture,
+      topTexture
+    };
+    
+    this.geometry.add(mesh);
+  }
+  
+  /**
+   * Generate a slope block (proper sloped geometry from corner heights)
+   */
+  generateSlopeBlock(worldX, worldZ, h00, h10, h01, h11, sideTexture, topTexture, textureManager) {
+    const maxHeight = Math.max(h00, h10, h01, h11);
+    if (maxHeight <= 0) return; // Skip blocks with no height
+    
+    // Create continuous sloped geometry by building custom geometry
+    // This creates a proper slope that connects all corner heights seamlessly
+    
+    const geometry = new THREE.BufferGeometry();
+    const vertices = [];
+    const indices = [];
+    const normals = [];
+    const uvs = [];
+    
+    // Define the 8 vertices of the block
+    // Bottom 4 vertices (at y=0 - ground level)
+    vertices.push(
+      worldX, 0, worldZ,           // 0: bottom-left-front
+      worldX + 1, 0, worldZ,       // 1: bottom-right-front  
+      worldX + 1, 0, worldZ + 1,   // 2: bottom-right-back
+      worldX, 0, worldZ + 1        // 3: bottom-left-back
+    );
+    
+    // Top 4 vertices (at individual height + offset for each corner)
+    vertices.push(
+      worldX, h00, worldZ,         // 4: top-left-front (height+offset)
+      worldX + 1, h10, worldZ,     // 5: top-right-front (height+offset)
+      worldX + 1, h11, worldZ + 1, // 6: top-right-back (height+offset)
+      worldX, h01, worldZ + 1      // 7: top-left-back (height+offset)
+    );
+    
+    // Define faces (triangles) - using counter-clockwise winding
+    const faces = [
+      // Bottom face (facing down - flat ground plane)
+      [0, 2, 1], [0, 3, 2],
+      
+      // Top face (facing up - 2 triangles connecting the 4 individual corner heights)
+      // This forms either a slope or flat plane depending on height differences
+      [4, 5, 6], [4, 6, 7],
+      
+      // 4 Side faces connecting bottom edges to top edges
+      // Front face
+      [0, 1, 5], [0, 5, 4],
+      
+      // Right face  
+      [1, 2, 6], [1, 6, 5],
+      
+      // Back face
+      [2, 3, 7], [2, 7, 6],
+      
+      // Left face
+      [3, 0, 4], [3, 4, 7]
+    ];
+    
+    // Add face indices
+    for (const face of faces) {
+      indices.push(...face);
+    }
+    
+    // Calculate normals for each face
+    for (let i = 0; i < faces.length; i++) {
+      const face = faces[i];
+      const v1 = new THREE.Vector3(vertices[face[0] * 3], vertices[face[0] * 3 + 1], vertices[face[0] * 3 + 2]);
+      const v2 = new THREE.Vector3(vertices[face[1] * 3], vertices[face[1] * 3 + 1], vertices[face[1] * 3 + 2]);
+      const v3 = new THREE.Vector3(vertices[face[2] * 3], vertices[face[2] * 3 + 1], vertices[face[2] * 3 + 2]);
+      
+      const normal = new THREE.Vector3();
+      normal.crossVectors(
+        new THREE.Vector3().subVectors(v2, v1),
+        new THREE.Vector3().subVectors(v3, v1)
+      ).normalize();
+      
+      // Add normal for each vertex of this face
+      for (let j = 0; j < 3; j++) {
+        normals.push(normal.x, normal.y, normal.z);
+      }
+    }
+    
+    // Simple UV mapping
+    for (let i = 0; i < faces.length * 3; i++) {
+      uvs.push((i % 2), Math.floor(i / 2) % 2);
+    }
+    
+    // Set geometry attributes
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    
+    // Create mesh with the custom geometry
+    const material = textureManager.getTopMaterial(topTexture);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(0, 0, 0); // Already positioned in geometry
+    mesh.name = `slope_${worldX}_${worldZ}`;
+    mesh.userData = { 
+      type: 'slope', 
       chunkId: this.id,
       cornerHeights: { h00, h10, h01, h11 },
       sideTexture,
@@ -431,32 +558,46 @@ export class LevelManager {
   }
 
   /**
-   * Create example Spindizzy-style level with flat areas, slopes, ramps and objects
+   * Create example Spindizzy-style level with flat area, edge walls, and ramps
    */
   createExampleLevel() {
-    // Height base map (9x9 corners for 8x8 blocks)
+    // Height base map (16x16 block heights) - Flat area with walls at edges
     const heightBase = `
-00 00 00 00 00 00 00 00 00
-00 01 01 01 01 01 01 01 00
-00 01 02 02 02 02 02 01 00
-00 01 02 03 03 03 02 01 00
-00 01 02 03 04 03 02 01 00
-00 01 02 03 03 03 02 01 00
-00 01 02 02 02 02 02 01 00
-00 01 01 01 01 01 01 01 00
-00 00 00 00 00 00 00 00 00`;
+00 00 00 00 03 03 03 03 03 03 03 03 03 03 03 03
+00 00 00 00 01 01 01 01 01 01 01 01 01 01 01 03
+00 00 00 00 01 01 01 01 01 01 01 01 01 01 01 03
+03 02 01 01 01 01 01 01 01 01 01 01 01 01 01 03
+03 03 01 01 01 01 01 02 02 01 01 01 01 01 01 03
+03 03 01 01 01 01 02 02 02 02 01 01 01 01 01 03
+03 03 01 01 01 02 02 02 02 02 02 01 01 01 01 03
+03 03 01 01 01 01 02 02 02 02 01 01 01 01 01 03
+03 03 01 01 01 01 01 02 02 01 01 01 01 01 01 03
+03 03 01 01 01 01 01 01 01 01 01 01 01 01 01 03  
+03 03 01 01 01 01 01 01 01 01 01 01 01 01 01 03
+03 03 01 01 01 01 01 01 01 01 01 01 01 01 01 03
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00`;
 
-    // Height offset map (9x9 corners for 8x8 blocks)
+    // Height offset map (16x16 block heights) - Add ramps and keep walls low
     const heightOffset = `
-00 00 00 00 00 00 00 00 00
-00 00 00 01 01 01 00 00 00
-00 00 01 01 02 01 01 00 00
-00 00 01 02 02 02 01 00 00
-00 00 01 02 03 02 01 00 00
-00 00 01 02 02 02 01 00 00
-00 00 01 01 02 01 01 00 00
-00 00 00 01 01 01 00 00 00
-00 00 00 00 00 00 00 00 00`;
+01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 01 01 01 01 01 01 00 00 00 00 00
+00 00 00 01 01 01 01 01 01 01 01 01 01 00 00 00
+00 00 00 01 01 01 01 00 00 01 01 01 01 00 00 00
+00 00 00 01 01 01 00 00 00 00 01 01 01 00 00 00
+00 00 00 01 01 00 00 00 00 00 00 01 01 00 00 00
+00 00 00 01 01 01 00 00 00 00 01 01 01 00 00 00
+00 00 00 01 01 01 01 00 00 01 01 01 01 00 00 00
+00 00 00 01 01 01 01 01 01 01 01 01 01 00 00 00
+00 00 00 00 00 01 01 01 01 01 01 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+02 02 02 00 01 01 01 00 00 00 00 00 00 00 00 00
+02 02 02 01 01 01 01 00 00 00 00 00 00 00 00 00`;
 
     // Side texture indices (8x8 blocks) - using 2-digit format
     const sideTextures = `
@@ -497,7 +638,7 @@ L   C   S`;
     // Generate geometry for the chunk
     const chunkGeometry = this.generateChunkGeometry(0, 0);
     
-    console.log('Example Spindizzy level created with flat areas, slopes, ramps and objects');
+    console.log('Example Spindizzy level created with flat area, edge walls, and central ramps');
     return chunkGeometry;
   }
 
